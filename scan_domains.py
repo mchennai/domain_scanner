@@ -1,7 +1,7 @@
 import os
 import socket
-import subprocess
 from datetime import datetime
+import shodan
 
 # Create the necessary folders if they don't exist
 if not os.path.exists("input"):
@@ -11,6 +11,9 @@ if not os.path.exists("output"):
 
 # Input and output file paths
 input_file = "input/input_domains.txt"
+
+# Replace this with your Shodan API key
+SHODAN_API_KEY = "YOUR_SHODAN_API_KEY"
 
 def resolve_domain(domain):
     """
@@ -22,20 +25,19 @@ def resolve_domain(domain):
     except socket.gaierror:
         return None
 
-def scan_ports(ip):
+def scan_with_shodan(ip, api):
     """
-    Scans the open ports on a given IP using nmap and returns the result.
+    Uses Shodan to get information about the IP, including open ports.
     """
     try:
-        # Run nmap to get open ports
-        result = subprocess.check_output(["nmap", "-Pn", "-T4", "-p-", ip], universal_newlines=True)
-        return result
-    except subprocess.CalledProcessError as e:
-        return str(e)
+        host = api.host(ip)
+        return host
+    except shodan.APIError as e:
+        return f"Error: {str(e)}"
 
-def parse_exploitable_ports(nmap_output):
+def parse_exploitable_ports(host_info):
     """
-    Identifies exploitable ports based on nmap output.
+    Identifies exploitable ports based on Shodan data.
     """
     exploitable_ports = []
     vulnerabilities = {
@@ -51,14 +53,11 @@ def parse_exploitable_ports(nmap_output):
         9100: "Printer: Check for remote code execution vulnerabilities."
     }
 
-    for line in nmap_output.split("\n"):
-        if "/tcp" in line and "open" in line:
-            try:
-                port = int(line.split("/")[0])
-                if port in vulnerabilities:
-                    exploitable_ports.append(f"Port {port}: {vulnerabilities[port]}")
-            except ValueError:
-                pass
+    if "data" in host_info:
+        for service in host_info["data"]:
+            port = service["port"]
+            if port in vulnerabilities:
+                exploitable_ports.append(f"Port {port}: {vulnerabilities[port]}")
 
     return exploitable_ports
 
@@ -69,6 +68,9 @@ def main():
     if not os.path.exists(input_file):
         print(f"Input file {input_file} not found. Please create it with a list of domains.")
         return
+
+    # Initialize Shodan API
+    api = shodan.Shodan(SHODAN_API_KEY)
 
     # Read domains from input file
     with open(input_file, "r") as file:
@@ -92,20 +94,32 @@ def main():
 
         print(f"Resolved {domain} to IP: {ip}")
 
-        # Scan ports
-        print(f"Scanning ports for IP: {ip}")
-        nmap_output = scan_ports(ip)
+        # Scan with Shodan
+        print(f"Scanning IP with Shodan: {ip}")
+        host_info = scan_with_shodan(ip, api)
+
+        if isinstance(host_info, str) and host_info.startswith("Error"):
+            print(f"Shodan Error for {ip}: {host_info}")
+            with open(result_file, "w") as file:
+                file.write(f"Domain: {domain}\n")
+                file.write(f"IP Address: {ip}\n")
+                file.write(f"Error from Shodan: {host_info}\n")
+            continue
 
         # Parse exploitable ports
-        exploitable_ports = parse_exploitable_ports(nmap_output)
+        exploitable_ports = parse_exploitable_ports(host_info)
 
         # Write results to file
         with open(result_file, "w") as file:
             file.write(f"Domain: {domain}\n")
             file.write(f"IP Address: {ip}\n")
-            file.write(f"Scan Date: {datetime.now()}\n")
-            file.write("\n--- Nmap Scan Results ---\n")
-            file.write(nmap_output)
+            file.write(f"Scan Date: {datetime.now()}\n\n")
+            file.write("--- Shodan Scan Results ---\n")
+            if "data" in host_info:
+                for service in host_info["data"]:
+                    file.write(f"Port: {service['port']}, Service: {service.get('product', 'Unknown')}\n")
+            else:
+                file.write("No open ports found.\n")
             file.write("\n--- Exploitable Ports ---\n")
             if exploitable_ports:
                 file.write("\n".join(exploitable_ports) + "\n")
