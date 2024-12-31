@@ -2,28 +2,35 @@ import nmap
 import requests
 import argparse
 
-def scan_target(ip, port):
+def scan_target(ip, ports):
     """
-    Use nmap to scan the IP address and port to detect running service and version.
+    Use nmap to scan the IP address and specified ports to detect running services and versions.
     """
     scanner = nmap.PortScanner()
+    detected_services = {}
 
     try:
-        print(f"Scanning {ip}:{port} for open ports and service versions...")
-        scanner.scan(ip, str(port), arguments='-sV')  # Service version detection
+        print(f"Scanning {ip} on ports {ports} for open services and versions...")
+        # Scan ports and use the `--script banner` option to fetch service banners
+        scanner.scan(ip, ports, arguments='-sV --script banner')
 
-        if port in scanner[ip]['tcp']:
-            service_info = scanner[ip]['tcp'][port]
-            service_name = service_info.get('name', 'unknown')
-            service_version = service_info.get('version', 'unknown')
-            print(f"Detected service: {service_name} {service_version}")
-            return service_name, service_version
-        else:
-            print(f"No service detected on {ip}:{port}")
-            return None, None
+        for port in ports.split(','):
+            port = int(port.strip())
+            if port in scanner[ip]['tcp']:
+                service_info = scanner[ip]['tcp'][port]
+                service_name = service_info.get('name', 'unknown')
+                service_version = service_info.get('version', 'unknown')
+                if service_version == 'unknown':
+                    # If version is not detected, try to get the product information
+                    service_version = service_info.get('product', 'unknown')
+                print(f"Port {port}: Detected service {service_name} {service_version}")
+                detected_services[port] = (service_name, service_version)
+            else:
+                print(f"Port {port}: No service detected or port is closed.")
     except Exception as e:
         print(f"Error scanning target: {e}")
-        return None, None
+
+    return detected_services
 
 def fetch_cves(service, version):
     """
@@ -31,11 +38,12 @@ def fetch_cves(service, version):
     """
     if not service or not version:
         print("No service or version detected. Skipping CVE check.")
-        return
+        return []
 
     api_url = "https://services.nvd.nist.gov/rest/json/cves/1.0"
     query = f"{service} {version}"
     params = {"keyword": query, "resultsPerPage": 10}
+    cve_results = []
 
     print(f"Querying NVD for CVEs related to {service} {version}...")
 
@@ -43,7 +51,7 @@ def fetch_cves(service, version):
         response = requests.get(api_url, params=params)
         if response.status_code != 200:
             print("Failed to fetch CVEs from NVD API.")
-            return
+            return []
 
         cve_data = response.json()
         cve_items = cve_data.get("result", {}).get("CVE_Items", [])
@@ -54,26 +62,4 @@ def fetch_cves(service, version):
             print(f"Found {len(cve_items)} CVEs for {service} {version}:")
             for cve in cve_items:
                 cve_id = cve['cve']['CVE_data_meta']['ID']
-                description = cve['cve']['description']['description_data'][0]['value']
-                print(f" - {cve_id}: {description}")
-    except Exception as e:
-        print(f"Error querying CVEs: {e}")
-
-def main():
-    # Set up argument parsing
-    parser = argparse.ArgumentParser(description="Check for CVEs of a specific service and version running on a target IP and port.")
-    parser.add_argument("ip", help="Target IP address")
-    parser.add_argument("port", type=int, help="Target port number")
-    args = parser.parse_args()
-
-    target_ip = args.ip
-    target_port = args.port
-
-    # Scan the target for service and version
-    service, version = scan_target(target_ip, target_port)
-
-    # Fetch CVEs for the detected service and version
-    fetch_cves(service, version)
-
-if __name__ == "__main__":
-    main()
+                description = 
