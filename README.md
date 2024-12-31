@@ -19,9 +19,9 @@ domain-scanner/ ├── README.md ├── scan_domains.py ├── input/ �
 2. Add your list of domains to `input/input_domains.txt` (one domain per line).
 
 3. Run the script:
-python3 scan_domains.py
+   python3 scan_domains.py
 
-python3 check_vulnerabilities.py <ip address> <port number>
+   python3 check_vulnerabilities.py <ip address> <port number>
 
 4. Results will be generated in the `output/` folder, one file per domain.
 
